@@ -326,7 +326,7 @@ async function checkLockOwner(
   const lockScope = core.getInput('lock_scope').trim() || 'user'
   const isOwner =
     lockScope === 'pr' && lockData.issue_number
-      ? lockData.issue_number === context.issue.number
+      ? Number(lockData.issue_number) === Number(context.issue.number)
       : lockData.created_by === context.actor
 
   if (isOwner) {
