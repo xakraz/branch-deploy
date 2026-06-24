@@ -43,6 +43,34 @@ Let's review the core concepts of deployment locks in a short summary:
 - Locks can either be environment specific or global
 - Like all the features of this Action, users need `write` permissions or higher to use a command
 
+### PR-Scoped Locks
+
+By default, deployment locks are scoped to the **user** who created them. The lock owner can deploy from any pull request while holding the lock. This mirrors the Hubot-style deployment model used at GitHub.
+
+If you prefer locks scoped to the **pull request** instead, set `lock_scope: "pr"`. With this setting:
+
+- Any user can deploy from the PR that holds the lock
+- Deploys from a different PR are blocked, even if the same user triggers them
+- This prevents accidental rollbacks when switching between PRs
+
+| Scenario                        | `lock_scope: user` | `lock_scope: pr` |
+|---------------------------------|--------------------|-------------------|
+| Same user, same PR              | ✅ allowed          | ✅ allowed         |
+| Same user, different PR         | ✅ allowed          | ❌ blocked         |
+| Different user, same PR         | ❌ blocked          | ✅ allowed         |
+| Different user, different PR    | ❌ blocked          | ❌ blocked         |
+
+Example configuration:
+
+```yaml
+- uses: github/branch-deploy@vX
+  with:
+    lock_scope: "pr"
+    sticky_locks: "true"
+```
+
+> **Backward compatibility:** Existing locks created before this feature (without `issue_number` in `lock.json`) will fall back to user-scoped comparison regardless of the `lock_scope` setting.
+
 ### How do Deployment Locks Work?
 
 This Action uses GitHub branches to create a deployment lock. When you run `.lock` the following happens:
