@@ -149,6 +149,10 @@ inputs:
     description: 'If set to "true", then sticky_locks will also be used for noop deployments. This can be useful in some cases but it often leads to locks being left behind when users test noop deployments.'
     required: false
     default: "false"
+  lock_scope:
+    description: 'Controls how lock ownership is determined. "user" (default) scopes the lock to the GitHub user who created it. "pr" scopes the lock to the pull request that created it — any deploy from a different PR is blocked regardless of user, and any user can deploy from the locked PR.'
+    required: false
+    default: "user"
   allow_sha_deployments:
     description: 'If set to "true", then you can deploy a specific sha instead of a branch. Example: ".deploy 1234567890abcdef1234567890abcdef12345678 to production" - This is dangerous and potentially unsafe, view the docs to learn more: https://github.com/github/branch-deploy/blob/main/docs/sha-deployments.md'
     required: false
