@@ -53,6 +53,7 @@ beforeEach(() => {
   process.env.INPUT_LOCK_TRIGGER = '.lock'
   process.env.INPUT_ENVIRONMENT = 'production'
   process.env.INPUT_LOCK_INFO_ALIAS = '.wcid'
+  process.env.INPUT_LOCK_SCOPE = 'user'
 
   createdLock = {
     lockData: null,
@@ -1067,4 +1068,242 @@ test('throws an error if an unhandled exception occurs', async () => {
   } catch (e) {
     expect(e.message).toBe('Error: oh no')
   }
+})
+
+test('includes issue_number in lock data when creating a lock', async () => {
+  context.actor = 'monalisa'
+  context.payload.comment.body = '.lock'
+  process.env.INPUT_LOCK_SCOPE = 'user'
+  await lock(octokit, context, ref, 123, false, environment)
+  const createCall =
+    octokit.rest.repos.createOrUpdateFileContents.mock.calls[0][0]
+  const lockData = JSON.parse(
+    Buffer.from(createCall.content, 'base64').toString('utf-8')
+  )
+  expect(lockData.issue_number).toBe(1)
+})
+
+test('PR-scoped lock: same PR, same user - allows deployment', async () => {
+  context.actor = 'monalisa'
+  context.payload.comment.body = '.lock'
+  process.env.INPUT_LOCK_SCOPE = 'pr'
+  const lockDataWithIssue = {
+    reason: null,
+    branch: 'cool-new-feature',
+    created_at: '2022-06-15T21:12:14.041Z',
+    created_by: 'monalisa',
+    sticky: false,
+    environment: 'production',
+    unlock_command: '.unlock production',
+    global: false,
+    link: 'https://github.com/test-org/test-repo/pull/1#issuecomment-123',
+    issue_number: 1
+  }
+  const lockBase64 = Buffer.from(JSON.stringify(lockDataWithIssue)).toString(
+    'base64'
+  )
+  const octokitPrLock = {
+    rest: {
+      repos: {
+        getBranch: vi
+          .fn()
+          .mockReturnValueOnce({data: {commit: {sha: 'abc123'}}}),
+        get: vi.fn().mockReturnValue({data: {default_branch: 'main'}}),
+        getContent: vi
+          .fn()
+          .mockRejectedValueOnce(new NotFoundError('file not found'))
+          .mockReturnValueOnce({data: {content: lockBase64}}),
+        createOrUpdateFileContents: vi.fn().mockReturnValue({})
+      },
+      git: {createRef: vi.fn().mockReturnValue({status: 201})},
+      issues: {createComment: vi.fn().mockReturnValue({})}
+    }
+  }
+  const result = await lock(
+    octokitPrLock,
+    context,
+    ref,
+    123,
+    false,
+    environment
+  )
+  expect(result.status).toBe('owner')
+})
+
+test('PR-scoped lock: same PR, different user - allows deployment', async () => {
+  context.actor = 'monalisa'
+  context.payload.comment.body = '.lock'
+  process.env.INPUT_LOCK_SCOPE = 'pr'
+  const lockDataWithIssue = {
+    reason: 'Testing feature',
+    branch: 'octocats-everywhere',
+    created_at: '2022-06-14T21:12:14.041Z',
+    created_by: 'octocat',
+    sticky: true,
+    environment: 'production',
+    unlock_command: '.unlock production',
+    global: false,
+    link: 'https://github.com/test-org/test-repo/pull/1#issuecomment-456',
+    issue_number: 1
+  }
+  const lockBase64 = Buffer.from(JSON.stringify(lockDataWithIssue)).toString(
+    'base64'
+  )
+  const octokitPrLock = {
+    rest: {
+      repos: {
+        getBranch: vi
+          .fn()
+          .mockReturnValueOnce({data: {commit: {sha: 'abc123'}}}),
+        get: vi.fn().mockReturnValue({data: {default_branch: 'main'}}),
+        getContent: vi
+          .fn()
+          .mockRejectedValueOnce(new NotFoundError('file not found'))
+          .mockReturnValueOnce({data: {content: lockBase64}})
+      }
+    }
+  }
+  const result = await lock(
+    octokitPrLock,
+    context,
+    ref,
+    123,
+    false,
+    environment
+  )
+  expect(result.status).toBe('owner')
+})
+
+test('PR-scoped lock: different PR, same user - blocks deployment', async () => {
+  context.actor = 'monalisa'
+  context.payload.comment.body = '.lock'
+  process.env.INPUT_LOCK_SCOPE = 'pr'
+  const actionStatusSpy = vi
+    .spyOn(actionStatus, 'actionStatus')
+    .mockImplementation(() => undefined)
+  const lockDataWithIssue = {
+    reason: null,
+    branch: 'cool-new-feature',
+    created_at: '2022-06-15T21:12:14.041Z',
+    created_by: 'monalisa',
+    sticky: false,
+    environment: 'production',
+    unlock_command: '.unlock production',
+    global: false,
+    link: 'https://github.com/test-org/test-repo/pull/99#issuecomment-123',
+    issue_number: 99
+  }
+  const lockBase64 = Buffer.from(JSON.stringify(lockDataWithIssue)).toString(
+    'base64'
+  )
+  const octokitPrLock = {
+    rest: {
+      repos: {
+        getBranch: vi
+          .fn()
+          .mockReturnValueOnce({data: {commit: {sha: 'abc123'}}}),
+        get: vi.fn().mockReturnValue({data: {default_branch: 'main'}}),
+        getContent: vi
+          .fn()
+          .mockRejectedValueOnce(new NotFoundError('file not found'))
+          .mockReturnValueOnce({data: {content: lockBase64}})
+      }
+    }
+  }
+  const result = await lock(
+    octokitPrLock,
+    context,
+    ref,
+    123,
+    false,
+    environment
+  )
+  expect(result.status).toBe(false)
+  expect(setFailedMock).toHaveBeenCalled()
+  expect(saveStateMock).toHaveBeenCalledWith('bypass', 'true')
+  expect(actionStatusSpy).toHaveBeenCalled()
+})
+
+test('PR-scoped lock: different PR, different user - blocks deployment', async () => {
+  context.actor = 'monalisa'
+  context.payload.comment.body = '.lock'
+  process.env.INPUT_LOCK_SCOPE = 'pr'
+  const actionStatusSpy = vi
+    .spyOn(actionStatus, 'actionStatus')
+    .mockImplementation(() => undefined)
+  const lockDataWithIssue = {
+    reason: 'Testing feature',
+    branch: 'octocats-everywhere',
+    created_at: '2022-06-14T21:12:14.041Z',
+    created_by: 'octocat',
+    sticky: true,
+    environment: 'production',
+    unlock_command: '.unlock production',
+    global: false,
+    link: 'https://github.com/test-org/test-repo/pull/99#issuecomment-456',
+    issue_number: 99
+  }
+  const lockBase64 = Buffer.from(JSON.stringify(lockDataWithIssue)).toString(
+    'base64'
+  )
+  const octokitPrLock = {
+    rest: {
+      repos: {
+        getBranch: vi
+          .fn()
+          .mockReturnValueOnce({data: {commit: {sha: 'abc123'}}}),
+        get: vi.fn().mockReturnValue({data: {default_branch: 'main'}}),
+        getContent: vi
+          .fn()
+          .mockRejectedValueOnce(new NotFoundError('file not found'))
+          .mockReturnValueOnce({data: {content: lockBase64}})
+      }
+    }
+  }
+  const result = await lock(
+    octokitPrLock,
+    context,
+    ref,
+    123,
+    false,
+    environment
+  )
+  expect(result.status).toBe(false)
+  expect(setFailedMock).toHaveBeenCalled()
+})
+
+test('PR-scoped lock: old lock without issue_number falls back to user comparison', async () => {
+  context.actor = 'monalisa'
+  context.payload.comment.body = '.lock'
+  process.env.INPUT_LOCK_SCOPE = 'pr'
+  const actionStatusSpy = vi
+    .spyOn(actionStatus, 'actionStatus')
+    .mockImplementation(() => undefined)
+  // lockBase64Octocat has NO issue_number
+  // context.actor is 'monalisa', lock created_by is 'octocat'
+  // fallback to user comparison - mismatch - blocked
+  const octokitOldLock = {
+    rest: {
+      repos: {
+        getBranch: vi
+          .fn()
+          .mockReturnValueOnce({data: {commit: {sha: 'abc123'}}}),
+        get: vi.fn().mockReturnValue({data: {default_branch: 'main'}}),
+        getContent: vi
+          .fn()
+          .mockRejectedValueOnce(new NotFoundError('file not found'))
+          .mockReturnValueOnce({data: {content: lockBase64Octocat}})
+      }
+    }
+  }
+  const result = await lock(
+    octokitOldLock,
+    context,
+    ref,
+    123,
+    false,
+    environment
+  )
+  expect(result.status).toBe(false)
+  expect(setFailedMock).toHaveBeenCalled()
 })

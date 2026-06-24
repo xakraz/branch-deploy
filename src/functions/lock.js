@@ -69,7 +69,8 @@ async function createLock(
     environment: environment,
     global: global,
     unlock_command: await constructUnlockCommand(environment, global),
-    link: `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/pull/${context.issue.number}#issuecomment-${context.payload.comment.id}`
+    link: `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/pull/${context.issue.number}#issuecomment-${context.payload.comment.id}`,
+    issue_number: context.issue.number
   }
 
   // Create the lock file
@@ -320,8 +321,15 @@ async function checkLockOwner(
   leaveComment
 ) {
   core.debug('checking the owner of the lock...')
-  // If the requestor is the one who owns the lock, return 'owner'
-  if (lockData.created_by === context.actor) {
+
+  // Determine lock ownership based on lock_scope input
+  const lockScope = core.getInput('lock_scope').trim() || 'user'
+  const isOwner =
+    lockScope === 'pr' && lockData.issue_number
+      ? lockData.issue_number === context.issue.number
+      : lockData.created_by === context.actor
+
+  if (isOwner) {
     core.info(
       `✅ ${COLORS.highlight}${context.actor}${COLORS.reset} initiated this request and is also the owner of the current lock`
     )
